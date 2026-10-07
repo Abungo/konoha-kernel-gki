@@ -40,6 +40,7 @@
  #include <linux/rculist.h>
  #include <linux/uaccess.h>
  #include <asm/cacheflush.h>
+ #include <asm/patching.h>
  #include <linux/set_memory.h>
  #include <asm/mmu_context.h>
  #include <linux/license.h>
@@ -2627,14 +2628,14 @@ static struct kprobe kp_mca_vote = {
 /* ========================================================================
  * Dynamic Pattern-Matching Live-Patching Implementation
  * ======================================================================== */
-static void mca_live_patch(struct module *mod)
+static void __maybe_unused mca_live_patch(struct module *mod)
 {
 	static bool kp_registered = false;
 	u32 *text;
 	unsigned int text_size;
 	int i;
 
-	if (!mod || !mod->name)
+	if (!mod)
 		return;
 
 	if (strcmp(mod->name, "mca_common") == 0) {
@@ -2828,7 +2829,7 @@ static const struct kgsl_patch_profile kgsl_profiles[] = {
 /* ========================================================================
  * KGSL LM_LIMIT Bypass Patch (Dynamic Version)
  * ======================================================================== */
-static void kgsl_live_patch(struct module *mod)
+static void __maybe_unused kgsl_live_patch(struct module *mod)
 {
 	u32 *text;
 	unsigned int text_size;
@@ -2837,7 +2838,7 @@ static void kgsl_live_patch(struct module *mod)
 	bool patched_lm = false, patched_scm = false, patched_bin = false, patched_soc = false;
 	int patched_dt = 0;
 
-	if (!mod || !mod->name || strcmp(mod->name, "msm_kgsl") != 0)
+	if (!mod || strcmp(mod->name, "msm_kgsl") != 0)
 		return;
 
 	/* 1. Identify Firmware Version via scmversion */
@@ -3006,14 +3007,14 @@ static struct kprobe kp_nvt_set_extend_custom_cmd = {
 	.pre_handler = pre_nvt_set_extend_custom_cmd,
 };
 
-static void touch_live_patch(struct module *mod)
+static void __maybe_unused touch_live_patch(struct module *mod)
 {
 	static bool touch_kp_1 = false, touch_kp_2 = false;
 	int i;
 	u32 *text;
 	unsigned int text_size;
 
-	if (!mod || !mod->name)
+	if (!mod)
 		return;
 
 	text = mod->mem[MOD_TEXT].base;
@@ -3176,6 +3177,7 @@ static struct kprobe kp_mibbr_white = {
  *
  * We override the return in post_handler to always return 1.
  */
+#if 0
 static atomic_t dfc_grant_count = ATOMIC_INIT(0);
 
 static int pre_dfc_ignore_grant(struct kprobe *p, struct pt_regs *regs)
@@ -3217,6 +3219,7 @@ static struct kprobe kp_rmnet_powersave = {
 	.symbol_name = "qmi_rmnet_set_powersave_mode",
 	.pre_handler = pre_rmnet_powersave,
 };
+#endif
 
 /* ========================================================================
  * WiFi + Mobile Data Live-Patch Dispatcher (Safe Version)
@@ -3224,13 +3227,12 @@ static struct kprobe kp_rmnet_powersave = {
  * Registers kprobes only for proven-safe argument modifications.
  * Each registration is wrapped in error checking with dmesg logging.
  * ======================================================================== */
-static void wifi_live_patch(struct module *mod)
+static void __maybe_unused wifi_live_patch(struct module *mod)
 {
 	static bool kp_wlm = false, kp_coex = false, kp_bbr = false;
-	static bool kp_dfc = false, kp_ps = false;
 	int ret;
 
-	if (!mod || !mod->name)
+	if (!mod)
 		return;
 
 	if (strcmp(mod->name, "qca_cld3_wcn7750") == 0) {
@@ -3564,7 +3566,7 @@ static void spam_log_live_patch(struct module *mod)
 	};
 	int p;
 
-	if (!mod || !mod->name)
+	if (!mod)
 		return;
 
 	if (strcmp(mod->name, "si_haptic") != 0 &&

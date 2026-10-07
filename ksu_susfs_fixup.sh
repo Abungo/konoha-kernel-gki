@@ -76,7 +76,7 @@ MANAGER=$(detect_manager "$KSU_KERNEL" "$MANAGER_HINT")
 echo "[SUSFS-Fixup] Manager: $MANAGER"
 
 if [ "$MANAGER" = "resukisu" ]; then
-    echo "[SUSFS-Fixup] ReSukiSU has native SUSFS — applying typo fix."
+    echo "[SUSFS-Fixup] ReSukiSU has native SUSFS — applying global fixes and skipping intrusive overrides."
     if [ -f "$KSU_KERNEL/runtime/ksud_integration.c" ]; then
         sed -i 's/ksu_init_rc_hook_key_false/ksu_is_init_rc_hook_enabled/g' "$KSU_KERNEL/runtime/ksud_integration.c"
     fi
@@ -85,33 +85,22 @@ if [ "$MANAGER" = "resukisu" ]; then
         sed -i 's/static void susfs_run_sus_path_loop(void)/void susfs_run_sus_path_loop(void)/g' "$(dirname "$0")/fs/susfs.c"
         echo "[SUSFS-Fixup] fs/susfs.c: Made susfs_run_sus_path_loop non-static"
     fi
-    # [FIX] selinux_hide.c — remove undefined context_struct_compute_av_fn extern
-    # The kernel's context_struct_compute_av in security/selinux/ss/services.c is
-    # static and not exported. selinux_hide.c has its own local copy, so remove
-    # the extern reference and always use the local implementation.
-    SELINUX_HIDE_C="$KSU_KERNEL/feature/selinux_hide.c"
-    if [ -f "$SELINUX_HIDE_C" ] && grep -q "context_struct_compute_av_fn" "$SELINUX_HIDE_C" 2>/dev/null; then
-        # Remove the extern declaration
-        sed -i '/^extern void context_struct_compute_av_fn/,/struct extended_perms \*xperms);/d' "$SELINUX_HIDE_C"
-        # Replace conditional call with direct call to local function
-        sed -i '/if (context_struct_compute_av_fn) {/{
-            N;N;N;N
-            s/if (context_struct_compute_av_fn) {\n.*context_struct_compute_av_fn.*\n.*} else {\n.*context_struct_compute_av(.*\n.*}/context_struct_compute_av(policydb, scontext, tcontext, tclass, avd, NULL);/
-        }' "$SELINUX_HIDE_C"
-        echo "[SUSFS-Fixup] selinux_hide.c: Removed undefined context_struct_compute_av_fn"
+    # Ensure SUSFS version detection in Makefile
+    if [ -f "$KSU_KERNEL/Makefile" ] && ! grep -q "SUSFS_VERSION" "$KSU_KERNEL/Makefile" 2>/dev/null; then
+        cat >> "$KSU_KERNEL/Makefile" << 'MKEOF'
+
+## For susfs stuff ##
+ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
+$(eval SUSFS_VERSION=$(shell cat $(srctree)/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g'))
+$(info )
+$(info -- SUSFS_VERSION: $(SUSFS_VERSION))
+else
+$(info -- You have not integrated susfs in your kernel yet.)
+endif
+MKEOF
     fi
-    # [FIX] sucompat.c + kernel_umount.c — ksu_ vs susfs_ prefix mismatch
-    # ReSukiSU uses ksu_is_current_proc_umounted / ksu_set_current_proc_umounted
-    # but SUSFS v2.1 defines them as susfs_is_current_proc_umounted / susfs_set_current_proc_umounted
-    for _f in "$KSU_KERNEL/feature/sucompat.c" "$KSU_KERNEL/feature/kernel_umount.c"; do
-        if [ -f "$_f" ]; then
-            if grep -q 'ksu_is_current_proc_umounted\|ksu_set_current_proc_umounted' "$_f" 2>/dev/null; then
-                sed -i 's/ksu_is_current_proc_umounted/susfs_is_current_proc_umounted/g' "$_f"
-                sed -i 's/ksu_set_current_proc_umounted/susfs_set_current_proc_umounted/g' "$_f"
-                echo "[SUSFS-Fixup] $(basename "$_f"): Fixed ksu_ -> susfs_ proc umount prefix"
-            fi
-        fi
-    done
+    echo "[SUSFS-Fixup] ReSukiSU compatibility completed safely."
+    exit 0
 fi
 
 # ==========================================================================
@@ -120,30 +109,6 @@ fi
 if [ -f "$(dirname "$0")/fs/susfs.c" ]; then
     sed -i 's/static void susfs_run_sus_path_loop(void)/void susfs_run_sus_path_loop(void)/g' "$(dirname "$0")/fs/susfs.c"
     echo "[SUSFS-Fixup] fs/susfs.c: Made susfs_run_sus_path_loop non-static"
-
-    SUSFS_C="$(dirname "$0")/fs/susfs.c"
-    if ! grep -q "susfs_open_redirect_spoof_show_map_vma(" "$SUSFS_C" 2>/dev/null; then
-        sed -i '/#endif \/\/ #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT/i \
-\
-int susfs_open_redirect_spoof_show_map_vma(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char *spoofed_name) {\
-	struct st_susfs_open_redirect_hlist *entry = NULL;\
-	int srcu_idx = srcu_read_lock(\&susfs_srcu_open_redirect);\
-\
-	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {\
-		if (entry->reversed_lookup_only \&\& entry->target_dev == inode->i_sb->s_dev) {\
-			*out_ino = entry->redirected_ino;\
-			*out_dev = entry->redirected_dev;\
-			if (spoofed_name)\
-				strscpy(spoofed_name, entry->info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME - 1);\
-			srcu_read_unlock(\&susfs_srcu_open_redirect, srcu_idx);\
-			return 0;\
-		}\
-	}\
-	srcu_read_unlock(\&susfs_srcu_open_redirect, srcu_idx);\
-	return -EINVAL;\
-}' "$SUSFS_C"
-        echo "[SUSFS-Fixup] fs/susfs.c: Added missing susfs_open_redirect_spoof_show_map_vma"
-    fi
 fi
 
 # ==========================================================================
