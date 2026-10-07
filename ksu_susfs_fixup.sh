@@ -342,7 +342,13 @@ SUCOMPAT_H_EOF
     fi
 
     # Add the correct execve function declarations
-    if [ "$has_execve_sucompat" -eq 1 ]; then
+    if [ "$MANAGER" = "ksu-next" ]; then
+        cat >> "$SUCOMPAT_H" << 'EOF'
+
+long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, struct pt_regs *regs);
+long ksu_handle_execveat_sucompat(const char __user **filename_user, int orig_nr, struct pt_regs *regs);
+EOF
+    elif [ "$has_execve_sucompat" -eq 1 ]; then
         cat >> "$SUCOMPAT_H" << 'EOF'
 
 #ifndef CONFIG_KSU_SUSFS
@@ -366,11 +372,16 @@ int ksu_handle_execveat_init(struct filename *filename,
 EOF
     fi
 
-    cat >> "$SUCOMPAT_H" << 'EOF'
+    if [ "$MANAGER" != "ksu-next" ]; then
+        cat >> "$SUCOMPAT_H" << 'EOF'
 int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
     void *argv_user, void *envp_user, int *__never_use_flags);
 int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
     void *envp, int *flags);
+EOF
+    fi
+
+    cat >> "$SUCOMPAT_H" << 'EOF'
 #endif
 
 /*
